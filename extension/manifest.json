@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "Kitchen Reel Saver",
+  "version": "0.1.0",
+  "description": "Capture recipe pages and Instagram Reels into Kitchen Reel.",
+  "permissions": ["activeTab", "scripting"],
+  "host_permissions": [
+    "https://www.instagram.com/*",
+    "https://*/*"
+  ],
+  "action": {
+    "default_title": "Save to Kitchen Reel"
+  },
+  "background": {
+    "service_worker": "background.js"
+  }
+}
