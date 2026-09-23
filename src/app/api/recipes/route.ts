@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/auth";
 import { createRecipe, listRecipes } from "@/lib/store";
+import { persistCoverImage } from "@/lib/covers";
 import { RecipeInput } from "@/lib/types";
 
 export async function GET(request: Request) {
@@ -26,6 +27,7 @@ export async function POST(request: Request) {
 
   const recipe = await createRecipe({
     ...body,
+    coverImageUrl: await persistCoverImage(body.coverImageUrl ?? ""),
     ingredients: body.ingredients ?? [],
     notes: body.notes ?? "",
     collectionIds: body.collectionIds ?? [],

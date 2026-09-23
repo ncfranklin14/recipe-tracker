@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/auth";
 import { deleteRecipe, updateRecipe } from "@/lib/store";
+import { persistCoverImage } from "@/lib/covers";
 import { RecipeInput } from "@/lib/types";
 
 type RouteProps = {
@@ -11,6 +12,9 @@ export async function PATCH(request: Request, { params }: RouteProps) {
   await requireSession();
   const body = (await request.json()) as Partial<RecipeInput>;
   const { id } = await params;
+  if (body.coverImageUrl) {
+    body.coverImageUrl = await persistCoverImage(body.coverImageUrl);
+  }
   const recipe = await updateRecipe(id, body);
 
   if (!recipe) {

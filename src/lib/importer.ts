@@ -1,17 +1,16 @@
+import { decodeHtml, stripTags } from "@/lib/html";
+import {
+  INSTAGRAM_FALLBACK_TITLE,
+  canonicalInstagramUrl,
+  fetchInstagramData,
+  isInstagramHost,
+  parseInstagramCaption,
+  resolveInstagramShortcode,
+} from "@/lib/instagram";
 import { ImportPreview, ImportMeta, SourceType } from "@/lib/types";
 
-function decodeHtml(value: string) {
-  return value
-    .replace(/&amp;/g, "&")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">");
-}
-
-function stripTags(value: string) {
-  return decodeHtml(value.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim());
-}
+const WEB_USER_AGENT =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
 
 function makeImportMeta(meta: Partial<ImportMeta>): ImportMeta {
   return {
@@ -21,23 +20,6 @@ function makeImportMeta(meta: Partial<ImportMeta>): ImportMeta {
     status: meta.status ?? "failed",
     lastImportAttemptAt: new Date().toISOString(),
   };
-}
-
-function cleanInstagramTitle(value: string) {
-  const decoded = decodeHtml(value).trim();
-  const quotedMatch = decoded.match(/^[^:]+ on Instagram:\s*["“](.+?)["”]\s*$/i);
-  const titleSource = quotedMatch?.[1] ?? decoded.replace(/^[^:]+ on Instagram:\s*/i, "");
-
-  return titleSource
-    .replace(/\bingredients?\b[\s\S]*$/i, "")
-    .replace(/\bmethod\b[\s\S]*$/i, "")
-    .replace(/\binstructions?\b[\s\S]*$/i, "")
-    .replace(/\s*[|•]\s*[\s\S]*$/i, "")
-    .replace(/\s+on Instagram(?::.*)?$/i, "")
-    .replace(/^Instagram:\s*/i, "")
-    .replace(/^["“'`]+|["”'`]+$/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
 }
 
 function normalizeList(value: unknown) {
@@ -69,68 +51,6 @@ function normalizeList(value: unknown) {
   }
 
   return [];
-}
-
-function cleanCaptionLine(value: string) {
-  return value
-    .replace(/^[\s\-*•·▪▫◦]+/, "")
-    .replace(/^[0-9]+[.)]\s*/, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function looksLikeIngredient(value: string) {
-  return /^((\d+([/.]\d+)?)|(\d+\s\d+\/\d+)|one|two|three|four|five|six|seven|eight|nine|ten|a|an)\b/i.test(
-    value,
-  ) || /\b(cup|cups|tbsp|tablespoon|tablespoons|tsp|teaspoon|teaspoons|oz|ounce|ounces|lb|lbs|pound|pounds|g|kg|ml|l|clove|cloves|slice|slices|can|cans|package|packages)\b/i.test(
-    value,
-  );
-}
-
-export function extractIngredientsFromCaption(caption: string) {
-  const normalized = caption.replace(/\r/g, "").trim();
-  if (!normalized) {
-    return [];
-  }
-
-  const lower = normalized.toLowerCase();
-  const ingredientsMatch = lower.match(/ingredients?\s*:?/i);
-  const directionsMatch = lower.match(
-    /(instructions?|directions?|method|how to make|steps?)\s*:?/i,
-  );
-
-  let workingText = normalized;
-
-  if (ingredientsMatch?.index !== undefined) {
-    workingText = normalized.slice(ingredientsMatch.index + ingredientsMatch[0].length).trim();
-  }
-
-  if (directionsMatch?.index !== undefined) {
-    const boundary = directionsMatch.index - (ingredientsMatch?.index ?? 0) - (ingredientsMatch?.[0].length ?? 0);
-    if (boundary > 0 && boundary < workingText.length) {
-      workingText = workingText.slice(0, boundary).trim();
-    }
-  }
-
-  const lines = workingText
-    .split("\n")
-    .map(cleanCaptionLine)
-    .filter(Boolean)
-    .filter((line) => !line.startsWith("#"))
-    .filter((line) => !/^follow\b|^save\b|^full recipe\b|^link in bio\b|^credit\b/i.test(line));
-
-  const ingredientLines = lines.filter((line) => looksLikeIngredient(line));
-  if (ingredientLines.length > 0) {
-    return ingredientLines;
-  }
-
-  const inlineIngredients = workingText
-    .split(/,|\u2022|•/)
-    .map(cleanCaptionLine)
-    .filter(Boolean)
-    .filter((line) => looksLikeIngredient(line));
-
-  return inlineIngredients;
 }
 
 function toArray<T>(value: T | T[] | undefined) {
@@ -176,24 +96,6 @@ function pickRecipeSchema(candidates: unknown[]) {
   }) as Record<string, unknown> | undefined;
 }
 
-function getMetaContent(html: string, key: string) {
-  const patterns = [
-    new RegExp(`<meta[^>]+property=["']${key}["'][^>]+content=["']([^"']+)["'][^>]*>`, "i"),
-    new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+property=["']${key}["'][^>]*>`, "i"),
-    new RegExp(`<meta[^>]+name=["']${key}["'][^>]+content=["']([^"']+)["'][^>]*>`, "i"),
-    new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+name=["']${key}["'][^>]*>`, "i"),
-  ];
-
-  for (const pattern of patterns) {
-    const match = html.match(pattern);
-    if (match?.[1]) {
-      return decodeHtml(match[1]);
-    }
-  }
-
-  return "";
-}
-
 function findTextList(html: string, label: string) {
   const sectionMatch = html.match(
     new RegExp(`${label}[\\s\\S]{0,1800}<\\/ul>`, "i"),
@@ -208,9 +110,29 @@ function findTextList(html: string, label: string) {
     .filter(Boolean);
 }
 
+function getMetaContent(html: string, key: string) {
+  // Match double- and single-quoted attributes separately so apostrophes inside
+  // a double-quoted description don't cut the value short.
+  const patterns = [
+    new RegExp(`<meta[^>]+(?:property|name)=["']${key}["'][^>]+content="([^"]*)"[^>]*>`, "i"),
+    new RegExp(`<meta[^>]+(?:property|name)=["']${key}["'][^>]+content='([^']*)'[^>]*>`, "i"),
+    new RegExp(`<meta[^>]+content="([^"]*)"[^>]+(?:property|name)=["']${key}["'][^>]*>`, "i"),
+    new RegExp(`<meta[^>]+content='([^']*)'[^>]+(?:property|name)=["']${key}["'][^>]*>`, "i"),
+  ];
+
+  for (const pattern of patterns) {
+    const match = html.match(pattern);
+    if (match?.[1]) {
+      return decodeHtml(match[1]);
+    }
+  }
+
+  return "";
+}
+
 function makeFallbackTitle(url: URL, sourceType: SourceType) {
   if (sourceType === "instagram_reel") {
-    return "Saved Instagram Reel";
+    return INSTAGRAM_FALLBACK_TITLE;
   }
 
   const slug = url.pathname
@@ -227,20 +149,38 @@ function makeFallbackTitle(url: URL, sourceType: SourceType) {
   return slug.replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
-export async function buildImportPreview(urlInput: string): Promise<ImportPreview> {
-  const url = new URL(urlInput);
+function getSchemaImage(schema: Record<string, unknown> | undefined) {
+  const image = schema?.image;
+  if (typeof image === "string") {
+    return image;
+  }
+  if (Array.isArray(image)) {
+    const first = image[0];
+    if (typeof first === "string") {
+      return first;
+    }
+    if (first && typeof first === "object" && "url" in first) {
+      return String((first as { url: unknown }).url);
+    }
+  }
+  if (image && typeof image === "object" && "url" in image) {
+    return String((image as { url: unknown }).url);
+  }
+  return "";
+}
+
+export function sourceTypeForUrl(url: URL): SourceType {
+  return isInstagramHost(url.hostname) ? "instagram_reel" : "web";
+}
+
+async function buildWebPreview(urlInput: string, url: URL): Promise<ImportPreview> {
   const domain = url.hostname.replace(/^www\./, "");
-  const sourceType: SourceType = /instagram\.com$/.test(domain)
-    ? "instagram_reel"
-    : "web";
 
   try {
     const response = await fetch(urlInput, {
-      headers: {
-        "user-agent":
-          "Mozilla/5.0 (compatible; KitchenReelBot/1.0; +https://example.com)",
-      },
-      next: { revalidate: 0 },
+      headers: { "user-agent": WEB_USER_AGENT, "accept-language": "en-US,en;q=0.9" },
+      cache: "no-store",
+      signal: AbortSignal.timeout(12_000),
     });
     const html = await response.text();
 
@@ -254,50 +194,17 @@ export async function buildImportPreview(urlInput: string): Promise<ImportPrevie
       schemaIngredients.length > 0 ? schemaIngredients : findTextList(html, "ingredients");
 
     const title =
-      sourceType === "instagram_reel"
-        ? cleanInstagramTitle(openGraphTitle) || makeFallbackTitle(url, sourceType)
-        : (typeof schema?.name === "string" && schema.name) ||
-          openGraphTitle ||
-          makeFallbackTitle(url, sourceType);
+      (typeof schema?.name === "string" && decodeHtml(schema.name)) ||
+      openGraphTitle ||
+      makeFallbackTitle(url, "web");
     const summary =
-      sourceType === "instagram_reel"
-        ? ""
-        : (typeof schema?.description === "string" && schema.description) ||
-          openGraphDescription ||
-          "";
-    const coverImageUrl =
-      (typeof schema?.image === "string" && schema.image) ||
-      (Array.isArray(schema?.image) && typeof schema?.image[0] === "string" ? schema.image[0] : "") ||
-      openGraphImage ||
+      (typeof schema?.description === "string" && decodeHtml(schema.description)) ||
+      openGraphDescription ||
       "";
-
-    const parserResult = {
-      schemaTitle: typeof schema?.name === "string" ? schema.name : null,
-      openGraphTitle,
-      ingredientCount: ingredients.length,
-    };
-
-    if (sourceType === "instagram_reel") {
-      return {
-        sourceType,
-        sourceUrl: urlInput,
-        sourceDomain: domain,
-        title,
-        coverImageUrl,
-        summary,
-        ingredients,
-        notes: "",
-        importMeta: makeImportMeta({
-          rawContent: html.slice(0, 4000),
-          parserResult,
-          confidence: title !== "Saved Instagram Reel" || coverImageUrl ? "medium" : "low",
-          status: title !== "Saved Instagram Reel" || coverImageUrl ? "partial" : "failed",
-        }),
-      };
-    }
+    const coverImageUrl = getSchemaImage(schema) || openGraphImage || "";
 
     return {
-      sourceType,
+      sourceType: "web",
       sourceUrl: urlInput,
       sourceDomain: domain,
       title,
@@ -307,29 +214,166 @@ export async function buildImportPreview(urlInput: string): Promise<ImportPrevie
       notes: "",
       importMeta: makeImportMeta({
         rawContent: html.slice(0, 4000),
-        parserResult,
+        parserResult: {
+          schemaTitle: typeof schema?.name === "string" ? schema.name : null,
+          openGraphTitle,
+          ingredientCount: ingredients.length,
+          httpStatus: response.status,
+        },
         confidence: schemaIngredients.length > 0 ? "high" : "medium",
         status: ingredients.length > 0 || Boolean(summary) ? "success" : "partial",
       }),
     };
   } catch (error) {
     return {
-      sourceType,
+      sourceType: "web",
       sourceUrl: urlInput,
       sourceDomain: domain,
-      title: makeFallbackTitle(url, sourceType),
+      title: makeFallbackTitle(url, "web"),
       coverImageUrl: "",
       summary: "",
       ingredients: [],
       notes: "",
       importMeta: makeImportMeta({
-        rawContent: null,
-        parserResult: {
-          error: error instanceof Error ? error.message : "Unknown import error",
-        },
+        parserResult: { error: error instanceof Error ? error.message : "Unknown import error" },
         confidence: "low",
         status: "failed",
       }),
     };
   }
+}
+
+export type InstagramCaptionInput = {
+  caption: string;
+  imageUrl?: string;
+  author?: string;
+  fallbackTitle?: string;
+  source: string;
+  extra?: Record<string, unknown>;
+};
+
+// Turns a Reel caption into a preview. Shared by the link importer and the
+// browser-extension capture flow.
+export async function buildInstagramPreviewFromCaption(
+  sourceUrl: string,
+  input: InstagramCaptionInput,
+): Promise<ImportPreview> {
+  const parsed = parseInstagramCaption(input.caption);
+  let ingredients = parsed.ingredients;
+  let summary = parsed.method;
+  let coverImageUrl = input.imageUrl ?? "";
+  let linkedRecipe: string | null = null;
+
+  // Many creators put the ingredients on their blog and link it in the caption.
+  if (ingredients.length === 0 && parsed.links.length > 0) {
+    const link = parsed.links[0];
+    try {
+      const linked = await buildWebPreview(link, new URL(link));
+      if (linked.ingredients.length > 0) {
+        ingredients = linked.ingredients;
+        summary = summary || linked.summary;
+        coverImageUrl = coverImageUrl || linked.coverImageUrl;
+        linkedRecipe = link;
+      }
+    } catch {
+      // Ignore; the Reel itself still imports.
+    }
+  }
+
+  const title = parsed.title || input.fallbackTitle || INSTAGRAM_FALLBACK_TITLE;
+  const notesParts = [
+    input.author ? `Reel by @${input.author.replace(/^@/, "")}` : "",
+    linkedRecipe ? `Full recipe: ${linkedRecipe}` : parsed.links[0] ? `Link from caption: ${parsed.links[0]}` : "",
+  ].filter(Boolean);
+
+  const hasCaption = input.caption.trim().length > 0;
+  const status: ImportMeta["status"] = ingredients.length > 0 ? "success" : hasCaption || coverImageUrl ? "partial" : "failed";
+
+  return {
+    sourceType: "instagram_reel",
+    sourceUrl,
+    sourceDomain: "instagram.com",
+    title,
+    coverImageUrl,
+    summary,
+    ingredients,
+    notes: notesParts.join("\n"),
+    importMeta: makeImportMeta({
+      rawContent: hasCaption ? input.caption.slice(0, 4000) : null,
+      parserResult: {
+        source: input.source,
+        author: input.author || null,
+        ingredientCount: ingredients.length,
+        ingredientsFrom: linkedRecipe ? "linked_recipe" : ingredients.length > 0 ? "caption" : null,
+        linkedRecipe,
+        ...input.extra,
+      },
+      confidence: ingredients.length > 0 ? (linkedRecipe ? "high" : "medium") : "low",
+      status,
+    }),
+  };
+}
+
+async function buildInstagramPreview(urlInput: string, url: URL): Promise<ImportPreview> {
+  const info = await resolveInstagramShortcode(url);
+
+  if (!info) {
+    return {
+      sourceType: "instagram_reel",
+      sourceUrl: urlInput,
+      sourceDomain: "instagram.com",
+      title: INSTAGRAM_FALLBACK_TITLE,
+      coverImageUrl: "",
+      summary: "",
+      ingredients: [],
+      notes: "",
+      importMeta: makeImportMeta({
+        parserResult: { error: "Could not find a Reel or post ID in this link" },
+        confidence: "low",
+        status: "failed",
+      }),
+    };
+  }
+
+  const sourceUrl = canonicalInstagramUrl(info);
+  const data = await fetchInstagramData(info);
+
+  return buildInstagramPreviewFromCaption(sourceUrl, {
+    caption: data.caption,
+    imageUrl: data.imageUrl,
+    author: data.author,
+    source: data.source,
+    extra: {
+      shortcode: info.shortcode,
+      loginWall: data.loginWall,
+      ...(data.error && data.source === "none" ? { error: data.error } : {}),
+    },
+  });
+}
+
+export async function buildImportPreview(urlInput: string): Promise<ImportPreview> {
+  let url: URL;
+  try {
+    url = new URL(urlInput.trim());
+  } catch {
+    return {
+      sourceType: "web",
+      sourceUrl: urlInput,
+      sourceDomain: "",
+      title: "Untitled recipe",
+      coverImageUrl: "",
+      summary: "",
+      ingredients: [],
+      notes: "",
+      importMeta: makeImportMeta({
+        parserResult: { error: "That doesn't look like a valid link" },
+        confidence: "low",
+        status: "failed",
+      }),
+    };
+  }
+
+  return sourceTypeForUrl(url) === "instagram_reel"
+    ? buildInstagramPreview(url.toString(), url)
+    : buildWebPreview(url.toString(), url);
 }

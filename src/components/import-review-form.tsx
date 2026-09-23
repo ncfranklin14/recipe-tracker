@@ -26,6 +26,8 @@ export function ImportReviewForm({
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [status, setStatus] = useState<"draft" | "saved">("saved");
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
+  const isReel = preview.sourceType === "instagram_reel";
 
   const importStatusLabel = useMemo(() => {
     if (preview.importMeta.status === "success") {
@@ -39,6 +41,7 @@ export function ImportReviewForm({
 
   async function handleSave() {
     setSaving(true);
+    setSaveError("");
 
     const response = await fetch("/api/recipes", {
       method: "POST",
@@ -57,6 +60,12 @@ export function ImportReviewForm({
         status,
       }),
     });
+
+    if (!response.ok) {
+      setSaving(false);
+      setSaveError("Couldn't save this recipe. Try again.");
+      return;
+    }
 
     const recipe = await response.json();
     router.push(`/recipes/${recipe.id}`);
@@ -92,9 +101,13 @@ export function ImportReviewForm({
               Suggested workflow
             </span>
             <p className="mt-1 text-sm text-stone-700">
-              {preview.sourceType === "instagram_reel"
-                ? "Keep the Reel link, image, and title here. Open the Reel on Instagram whenever you want the full details."
-                : "Review the imported text and trim anything that looks noisy before saving."}
+              {!isReel
+                ? "Review the imported text and trim anything that looks noisy before saving."
+                : preview.importMeta.status === "failed"
+                  ? "Instagram didn't share this Reel's caption (it may be private or removed). Add the title and ingredients by hand, or use the browser extension while viewing the Reel."
+                  : preview.ingredients.length > 0
+                    ? "Ingredients were pulled from the Reel caption. Check them against the video before saving."
+                    : "The caption didn't list ingredients. Add them by hand, or open the Reel on Instagram for details."}
             </p>
           </div>
         </div>
@@ -116,23 +129,42 @@ export function ImportReviewForm({
           </div>
         </div>
 
-        {preview.sourceType === "web" ? (
-          <div className="space-y-2">
-            <label className="text-sm font-semibold text-stone-700">Summary</label>
-            <textarea className="textarea" onChange={(event) => setSummary(event.target.value)} value={summary} />
-          </div>
+        {coverImageUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            alt={title}
+            className="max-h-72 w-full rounded-[24px] border border-[var(--border)] object-cover"
+            src={coverImageUrl}
+          />
         ) : null}
 
-        {preview.sourceType === "web" ? (
-          <div className="space-y-2">
-            <label className="text-sm font-semibold text-stone-700">Ingredients</label>
-            <textarea
-              className="textarea"
-              onChange={(event) => setIngredients(event.target.value)}
-              placeholder="One ingredient per line"
-              value={ingredients}
-            />
-          </div>
+        <div className="space-y-2">
+          <label className="text-sm font-semibold text-stone-700">
+            {isReel ? "Method / caption notes" : "Summary"}
+          </label>
+          <textarea
+            className="textarea"
+            onChange={(event) => setSummary(event.target.value)}
+            placeholder={isReel ? "Steps from the Reel caption" : undefined}
+            value={summary}
+          />
+        </div>
+
+        <div className="space-y-2">
+          <label className="text-sm font-semibold text-stone-700">Ingredients</label>
+          <textarea
+            className="textarea"
+            onChange={(event) => setIngredients(event.target.value)}
+            placeholder="One ingredient per line"
+            value={ingredients}
+          />
+        </div>
+
+        {isReel && preview.importMeta.rawContent ? (
+          <details className="rounded-[24px] border border-[var(--border)] bg-white/55 p-4 text-sm text-stone-700">
+            <summary className="cursor-pointer font-semibold">Original Reel caption</summary>
+            <p className="mt-3 whitespace-pre-wrap">{preview.importMeta.rawContent}</p>
+          </details>
         ) : null}
 
         <div className="space-y-2">
@@ -197,6 +229,7 @@ export function ImportReviewForm({
           <button className="secondary-button" onClick={() => router.push("/")} type="button">
             Back to library
           </button>
+          {saveError ? <p className="text-sm text-red-700 sm:self-center">{saveError}</p> : null}
           <button className="primary-button" disabled={saving} onClick={handleSave} type="button">
             {saving ? "Saving..." : "Save recipe"}
           </button>

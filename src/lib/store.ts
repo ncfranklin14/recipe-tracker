@@ -1,3 +1,4 @@
+import { decodeHtml } from "@/lib/html";
 import { promises as fs } from "fs";
 import path from "path";
 import { randomUUID } from "crypto";
@@ -28,21 +29,24 @@ const seedStore: StoreShape = {
   recipes: [],
 };
 
+// Older Reel imports stored raw Open Graph titles such as
+// 'Name on Instagram: "Steak Ramen 🍜 INGREDIENTS ..."' or the login-wall
+// title "Instagram". Tidy only those; never touch ingredients or method.
 function cleanInstagramStoredTitle(value: string) {
-  return value
-    .replace(/&amp;/g, "&")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&#xbd;/g, "1/2")
-    .replace(/&#x2013;/gi, "-")
-    .replace(/&#x1f[0-9a-f]+;/gi, "")
+  const decoded = decodeHtml(value).trim();
+  if (/^instagram$/i.test(decoded)) {
+    return "";
+  }
+
+  if (!/ on Instagram:/i.test(decoded)) {
+    return decoded;
+  }
+
+  return decoded
     .replace(/^[^:]+ on Instagram:\s*/i, "")
     .replace(/\bingredients?\b[\s\S]*$/i, "")
-    .replace(/\bmethod\b[\s\S]*$/i, "")
-    .replace(/\binstructions?\b[\s\S]*$/i, "")
     .replace(/\s*[|•]\s*[\s\S]*$/i, "")
+    .replace(/[\p{Extended_Pictographic}\u{FE0F}\u{200D}]/gu, "")
     .replace(/^["“'`]+|["”'`]+$/g, "")
     .replace(/\s+/g, " ")
     .trim();
@@ -53,12 +57,8 @@ function normalizeRecipe(recipe: Recipe) {
     return recipe;
   }
 
-  return {
-    ...recipe,
-    title: cleanInstagramStoredTitle(recipe.title) || "Saved Instagram Reel",
-    summary: "",
-    ingredients: [],
-  };
+  const title = cleanInstagramStoredTitle(recipe.title) || "Saved Instagram Reel";
+  return title === recipe.title ? recipe : { ...recipe, title };
 }
 
 async function ensureStoreFile() {
