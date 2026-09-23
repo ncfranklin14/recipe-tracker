@@ -135,29 +135,27 @@ export function RecipeEditor({ collections, recipe, tags }: RecipeEditorProps) {
           </div>
         </div>
 
-        {recipe.sourceType === "web" ? (
-          <div className="space-y-2">
-            <label className="text-sm font-semibold text-stone-700">Summary</label>
-            <textarea
-              className="textarea"
-              onChange={(event) => setForm((current) => ({ ...current, summary: event.target.value }))}
-              value={form.summary}
-            />
-          </div>
-        ) : null}
+        <div className="space-y-2">
+          <label className="text-sm font-semibold text-stone-700">
+            {recipe.sourceType === "instagram_reel" ? "Method / caption notes" : "Summary"}
+          </label>
+          <textarea
+            className="textarea"
+            onChange={(event) => setForm((current) => ({ ...current, summary: event.target.value }))}
+            value={form.summary}
+          />
+        </div>
 
-        {recipe.sourceType === "web" ? (
-          <div className="space-y-2">
-            <label className="text-sm font-semibold text-stone-700">Ingredients</label>
-            <textarea
-              className="textarea"
-              onChange={(event) =>
-                setForm((current) => ({ ...current, ingredients: event.target.value }))
-              }
-              value={form.ingredients}
-            />
-          </div>
-        ) : null}
+        <div className="space-y-2">
+          <label className="text-sm font-semibold text-stone-700">Ingredients</label>
+          <textarea
+            className="textarea"
+            onChange={(event) =>
+              setForm((current) => ({ ...current, ingredients: event.target.value }))
+            }
+            value={form.ingredients}
+          />
+        </div>
 
         <div className="space-y-2">
           <label className="text-sm font-semibold text-stone-700">Notes</label>

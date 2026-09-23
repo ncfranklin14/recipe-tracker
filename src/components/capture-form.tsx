@@ -17,8 +17,8 @@ export function CaptureForm() {
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-sm text-stone-600">
-          Recipe sites auto-extract when possible. Instagram Reel saves always let
-          you finish manually.
+          Recipe sites and Reel captions auto-extract when possible. You can
+          review and edit everything before saving.
         </p>
         <button className="primary-button" type="submit">
           Review import

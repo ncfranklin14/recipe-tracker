@@ -13,7 +13,7 @@ Kitchen Reel is a mobile-first recipe app for saving recipes you find on the web
   - sort by newest updated or newest saved
 - Import review flow for:
   - standard recipe URLs with schema.org and Open Graph parsing
-  - Instagram Reel URLs with partial metadata plus manual cleanup
+  - Instagram Reel/post URLs: reads the caption from Instagram's public embed page to fill in the title, ingredients, method, cover image and creator. If the caption only links to a blog recipe, the app imports ingredients from that link. Cover images are copied to `data/covers/` because Instagram image links expire after a few days.
 - Full recipe editing screen
 - Duplicate-as-variation flow
 - API routes for import, recipes, collections, tags, and session handling
